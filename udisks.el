@@ -7,7 +7,7 @@
 ;; Created: Dezember 09, 2023
 ;; Modified: Dezember 09, 2023
 ;; Version: 0.0.1
-;; Keywords: convenience hardware
+;; Keywords: convenience unix
 ;; Homepage: https://github.com/caramelhooves/emacs-udisks
 ;; Package-Requires: ((emacs "25.1") (dash "2.19.1"))
 ;;
