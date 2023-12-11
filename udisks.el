@@ -9,7 +9,7 @@
 ;; Version: 0.0.1
 ;; Keywords: convenience hardware
 ;; Homepage: https://github.com/caramelhooves/emacs-udisks
-;; Package-Requires: ((emacs "25.1"))
+;; Package-Requires: ((emacs "25.1") (dash "2.19.1"))
 ;;
 ;; This file is not part of GNU Emacs.
 ;;
@@ -22,6 +22,7 @@
 
 
 (require 'dbus)
+(require 'dash)
 
 (defgroup udisks nil
   "Interface to udisks2."
@@ -105,9 +106,9 @@ using information from DRIVES."
     (pcase flag
       ('metadata
        `(metadata (category . mount-points)
-                  (affixation-function . ,(lambda (l)
-                                       (mapcar (lambda(block-device) (udisks--get-completion-annotation-function block-device drives)) block-devices)))))
-      (_ (all-completions str (mapcar #'car block-devices) pred)))))
+         (affixation-function . ,(lambda (_)
+                                   (mapcar (-rpartial #'udisks--get-completion-affixation-function drives) block-devices)))))
+      (_ (all-completions str block-devices pred)))))
 
 
 (defun udisks--completion-read-block-device (prompt)
