@@ -1,4 +1,4 @@
-;;; udisks.el --- Description -*- lexical-binding: t; -*-
+;;; udisks.el --- Mount/Unmount removable discs using Udisks2 -*- lexical-binding: t; -*-
 ;;
 ;; Copyright (C) 2023 Caramel Hooves
 ;;
@@ -37,21 +37,17 @@
 
 (defcustom udisks-dbus-unmount-options '(:array (:dict-entry ""( :variant ""))) "Unmount options for udisks2.")
 
-(defcustom udisks-dbus-methods
-  '("EnumerateDevices" "EnumerateFilesystems" "EnumerateJobs" "GetAll" "GetBlockDevices" "GetFilesystems" "GetJobs" "GetObjects" "GetVersion" "InstallMonitor" "UninstallMonitor" "UninhibitPolling" "InhibitPolling" "SetPollingInterval" "Poll" "PowerOff" "PowerOffDrive" "PowerOn" "Rescan" "RescanDrive" "RescanMedia" "SetDrivePower" "SetDriveSpindown" "SetSpindown" "Smartctl" "SmartctlExtended" "SmartctlShort" "SmartctlSelftest" "SmartctlSelftestStatus" "SmartctlSelftestUpdate" "SmartctlUpdate" "SmartctlVendorAttributes" "SmartctlVendorAttributesUpdate" "SmartctlXall" "SmartctlXallUpdate" "SmartctlXattributes" "SmartctlXattributesUpdate" "SmartctlXbadsect" "SmartctlXbadsectUpdate" "SmartctlXerror" "SmartctlXerrorUpdate" "SmartctlXselect" "SmartctlXselectUpdate" "SmartctlXselftest" "SmartctlXselftestUpdate" "SmartctlXstatus" "SmartctlXstatusUpdate" "SmartctlXupdate" "SmartctlXupdateUpdate" "SmartctlXvendorattributes" "SmartctlXvendorattributesUpdate" "SmartctlXxall" "SmartctlXxallUpdate" "SmartctlXxattributes" "SmartctlXxattributesUpdate" "SmartctlXxbadsect" "SmartctlXxbadsectUpdate" "SmartctlXxerror" "SmartctlXxerrorUpdate" "SmartctlXxselect" "SmartctlXxselectUpdate" "SmartctlXxselftest" "SmartctlXxselftestUpdate" "SmartctlXxstatus" "SmartctlXxstatusUpdate" "SmartctlXxupdate" "SmartctlXxupdateUpdate" "SmartctlXxvendorattributes" "SmartctlXxvendoratt"))
-
-
 (defun udisks--dbus-call (method &rest args)
-        "Call METHOD on udisks2 with ARGS."
-        (apply #'dbus-call-method
-                 :system
-                 udisks-dbus-name
-                 udisks-dbus-path
-                 udisks-dbus-interface
-                 method
-                 args))
+  "Call METHOD on udisks2 with ARGS."
+  (apply #'dbus-call-method
+         :system
+         udisks-dbus-name
+         udisks-dbus-path
+         udisks-dbus-interface
+         method
+         args))
 
-(defun udisks--get-version ()
+(defun udisks-get-version ()
   "Get udisks2 version."
   (dbus-get-property
    :system
@@ -60,68 +56,91 @@
    "org.freedesktop.UDisks2.Manager"
    "Version"))
 
-(defun udisks--get-drives ()
+(defun udisks--get-managed-objects ()
   "Get all connected drives(physical devices)."
-  (let ((objects
-         (dbus-call-method
-          :system
-          "org.freedesktop.UDisks2"
-          "/org/freedesktop/UDisks2"
-          "org.freedesktop.DBus.ObjectManager"
-          "GetManagedObjects")))
+  (dbus-call-method
+   :system
+   "org.freedesktop.UDisks2"
+   "/org/freedesktop/UDisks2"
+   "org.freedesktop.DBus.ObjectManager"
+   "GetManagedObjects"))
 
-    (seq-filter
-     (lambda (object)
-       (string-match-p "/org/freedesktop/UDisks2/drives/.*" (car object)))
-     objects)))
+(defun udisks--filter-drives (objects)
+  "Filter OBJECTS, return a list of all connected drives(physical devices)."
+  (seq-filter
+   (lambda (object)
+     (string-match-p "/org/freedesktop/UDisks2/drives/.*" (car object)))
+   objects))
 
-(defun udisks--get-block-devices ()
-  "Get all block devices."
-  (let ((objects
-         (dbus-call-method
-          :system
-          "org.freedesktop.UDisks2"
-          "/org/freedesktop/UDisks2"
-          "org.freedesktop.DBus.ObjectManager"
-          "GetManagedObjects")))
+(defun udisks--filter-block-devices (objects)
+  "Filter OBJECTS, return a list of all block devices."
+  (seq-filter
+   (lambda (object)
+     (string-match-p "/org/freedesktop/UDisks2/block_devices/.*" (car object)))
+   objects))
 
-    (seq-filter
-     (lambda (object)
-       (string-match-p "/org/freedesktop/UDisks2/block_devices/.*" (car object)))
-     objects)))
+(defun udisks--nul-terminated-string-to-string (byte-sequence)
+  "Convert nul-terminated BYTE-SEQUENCE of ASCII characters into string."
 
-(defun udisks--get-block-devices-with-filesystem ()
-  "Get all block devices which implement `org.freedesktop.UDisks2.Filesystem'."
-  (seq-filter (lambda (object) (member "org.freedesktop.UDisks2.Filesystem" (mapcar #'car (car (cdr object)))))
-              (udisks--get-block-devices)))
+  ;; TODO error checking: throw an error if byte sequence is not null-terminated
+  (let ((ret (split-string (apply #'string b) "\x0")))
+    (car ret)))
 
-;; Drive->Id
-;; Device
-(defun udisks--mount (object)
- "Mount OBJECT."
- (interactive (let
-                  ((objects (udisks--get-block-devices-with-filesystem)))
-                (list (assoc (completing-read "Mount: " (mapcar #'car objects)) objects))))
- (dbus-call-method
-  :system
-  "org.freedesktop.UDisks2"
-  (car object)
-  "org.freedesktop.UDisks2.Filesystem"
-  "Mount"
-  udisks-dbus-mount-options))
+(defun udisks--get-completion-affixation-function (block-device drives)
+  "Return a list of three elements to serve as annotation for BLOCK-DEVICE.
+The list contains: block device name, name of physical drive from
+DRIVES and a comma separated list of mount points."
+  (let* ((mount-points (mapcar #'udisks--nul-terminated-string-to-string (caadr (assoc "MountPoints" (cadr (assoc "org.freedesktop.UDisks2.Filesystem" (cadr block-device)))))))
+         (drive-name (caadr (assoc "Drive" (cadr (assoc "org.freedesktop.UDisks2.Block" (cadr block-device))))))
+         (drive (assoc drive-name drives))
+         (drive-id (caadr (assoc "Id" (cadr (assoc "org.freedesktop.UDisks2.Drive" (cadr drive)))))))
+    (list (string-remove-prefix "/org/freedesktop/UDisks2/block_devices/" (car block-device)) drive-id (format " -> %s" (string-join mount-points ",")))))
 
-(defun udisks--unmount (object)
- "Un-mount OBJECT."
- (interactive (let
-                  ((objects (udisks--get-block-devices-with-filesystem)))
-                (list (assoc (completing-read "Un-Mount: " (mapcar #'car objects)) objects))))
- (dbus-call-method
-  :system
-  "org.freedesktop.UDisks2"
-  (car object)
-  "org.freedesktop.UDisks2.Filesystem"
-  "Unmount"
-  udisks-dbus-unmount-options))
+(defun udisks--completion (block-devices drives)
+  "Return a completion function.
+The completion function is suitable to be passed in
+`completing-read'. It also provide annotation for BLOCK-DEVICES
+using information from DRIVES."
+  (lambda (str pred flag)
+    (pcase flag
+      ('metadata
+       `(metadata (category . mount-points)
+                  (affixation-function . ,(lambda (l)
+                                       (mapcar (lambda(block-device) (udisks--get-completion-annotation-function block-device drives)) block-devices)))))
+      (_ (all-completions str (mapcar #'car block-devices) pred)))))
+
+
+(defun udisks--completion-read-block-device (prompt)
+  "Read block device name from minibuffer.
+PROMPT is a string to prompt with."
+  (let*
+      ((objects (udisks--get-managed-objects))
+       (block-devices (udisks--filter-block-devices objects))
+       (drives (udisks--filter-drives objects))
+       (block-device-name (completing-read prompt (udisks--completion block-devices drives))))
+    block-device-name))
+
+(defun udisks-mount (block-device-name)
+  "Mount a block device with BLOCK-DEVICE-NAME."
+  (interactive (list (udisks--completion-read-block-device "Mount block device: ")))
+  (dbus-call-method
+   :system
+   "org.freedesktop.UDisks2"
+   block-device-name
+   "org.freedesktop.UDisks2.Filesystem"
+   "Mount"
+   udisks-dbus-mount-options))
+
+(defun udisks-unmount (object)
+  "Un-mount OBJECT."
+  (interactive (list (udisks--completion-read-block-device "Un-Mount block device")))
+  (dbus-call-method
+   :system
+   "org.freedesktop.UDisks2"
+   (car object)
+   "org.freedesktop.UDisks2.Filesystem"
+   "Unmount"
+   udisks-dbus-unmount-options))
 
 (provide 'udisks)
 ;;; udisks.el ends here
