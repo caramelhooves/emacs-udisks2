@@ -132,13 +132,13 @@ PROMPT is a string to prompt with."
    "Mount"
    udisks-dbus-mount-options))
 
-(defun udisks-unmount (object)
-  "Un-mount OBJECT."
+(defun udisks-unmount (block-device-name)
+  "Un-mount BLOCK-DEVICE-NAME."
   (interactive (list (udisks--completion-read-block-device "Un-Mount block device")))
   (dbus-call-method
    :system
    "org.freedesktop.UDisks2"
-   (car object)
+   block-device-name
    "org.freedesktop.UDisks2.Filesystem"
    "Unmount"
    udisks-dbus-unmount-options))
