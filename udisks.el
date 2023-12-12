@@ -84,7 +84,7 @@
   "Convert nul-terminated BYTE-SEQUENCE of ASCII characters into string."
 
   ;; TODO error checking: throw an error if byte sequence is not null-terminated
-  (let ((ret (split-string (apply #'string b) "\x0")))
+  (let ((ret (split-string (apply #'string byte-sequence) "\x0")))
     (car ret)))
 
 (defun udisks--get-completion-affixation-function (block-device drives)
