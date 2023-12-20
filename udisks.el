@@ -106,8 +106,8 @@ using information from DRIVES."
     (pcase flag
       ('metadata
        `(metadata (category . mount-points)
-         (affixation-function . ,(lambda (_)
-                                   (mapcar (-rpartial #'udisks--get-completion-affixation-function drives) block-devices)))))
+         (affixation-function . ,(lambda (block-devices-names)
+                                   (mapcar (lambda (block-device-name) (udisks--get-completion-affixation-function (assoc block-device-name block-devices) drives)) block-devices-names)))))
       (_ (all-completions str block-devices pred)))))
 
 
